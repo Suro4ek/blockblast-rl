@@ -115,12 +115,12 @@ def main():
             learning_rate=linear_schedule(args.lr),  # LR decay
             n_steps=2048,  # Steps per env before update
             batch_size=args.batch_size,
-            n_epochs=10,  # PPO epochs per update
-            gamma=0.995,  # Discount factor (higher = more long-term thinking)
+            n_epochs=4,  # Fewer epochs = more stable
+            gamma=0.99,  # Discount factor
             gae_lambda=0.95,  # GAE lambda
-            clip_range=0.2,  # PPO clip range
-            clip_range_vf=0.2,  # Value function clip
-            ent_coef=0.01,  # Entropy coefficient (exploration)
+            clip_range=0.1,  # Tighter clip = more stable
+            clip_range_vf=None,  # No value clip
+            ent_coef=0.005,  # Lower entropy = less random
             vf_coef=0.5,  # Value function coefficient
             max_grad_norm=0.5,  # Gradient clipping
             policy_kwargs=policy_kwargs,
