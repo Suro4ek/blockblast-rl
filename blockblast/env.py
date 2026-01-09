@@ -103,15 +103,36 @@ class BlockBlastEnv(gym.Env):
         block = self.game.current_blocks[block_idx]
         if block is None or not self.game.can_place(block, row, col):
             # Invalid action - this shouldn't happen with proper masking
-            # Return small negative reward and don't change state
-            return self._get_obs(), -1.0, False, False, self._get_info()
+            return self._get_obs(), -10.0, False, False, self._get_info()
+
+        # Count valid actions before move
+        valid_before = len(self.game.get_valid_actions())
 
         # Execute action
-        reward = float(self.game.place_block(block_idx, row, col))
+        base_reward = float(self.game.place_block(block_idx, row, col))
 
         # Check for game over
         terminated = self.game.is_game_over()
         truncated = False
+
+        # Reward shaping for better learning
+        reward = base_reward
+
+        if terminated:
+            # Penalty for game over (but not too harsh)
+            reward -= 20.0
+        else:
+            # Bonus for keeping options open (more valid moves = better position)
+            valid_after = len(self.game.get_valid_actions())
+            # Small bonus for maintaining flexibility
+            reward += valid_after * 0.05
+
+            # Bonus for keeping grid relatively empty (encourages line clearing)
+            fill_ratio = np.sum(self.game.grid) / (GRID_SIZE * GRID_SIZE)
+            if fill_ratio < 0.3:
+                reward += 2.0  # Bonus for clean board
+            elif fill_ratio > 0.7:
+                reward -= 1.0  # Slight penalty for crowded board
 
         if self.render_mode == "human":
             self.render()
