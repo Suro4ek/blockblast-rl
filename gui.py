@@ -5,9 +5,7 @@ import sys
 
 import pygame
 import numpy as np
-
-from sb3_contrib import MaskablePPO
-from sb3_contrib.common.wrappers import ActionMasker
+import torch
 
 from blockblast.env import BlockBlastEnv
 from blockblast.game import GRID_SIZE
@@ -37,7 +35,7 @@ WINDOW_HEIGHT = max(GRID_SIZE * CELL_SIZE + GRID_PADDING * 2 + 100, 580)
 
 
 class BlockBlastGUI:
-    def __init__(self, model_path: str | None = None):
+    def __init__(self, model_path: str | None = None, model_type: str = "auto"):
         pygame.init()
         self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
         pygame.display.set_caption("Block Blast RL Agent")
@@ -45,15 +43,35 @@ class BlockBlastGUI:
         self.font = pygame.font.Font(None, 36)
         self.small_font = pygame.font.Font(None, 24)
 
+        # Device for DQN
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
         # Load model
         self.model = None
+        self.model_type = None
         if model_path:
             print(f"Loading model from {model_path}...")
-            self.model = MaskablePPO.load(model_path)
+            if model_type == "auto":
+                # Detect model type from extension
+                model_type = "dqn" if model_path.endswith(".pt") else "ppo"
+
+            if model_type == "dqn":
+                from train_dqn import DQNetwork
+                self.model = DQNetwork(192).to(self.device)
+                checkpoint = torch.load(model_path, map_location=self.device)
+                self.model.load_state_dict(checkpoint["policy_net"])
+                self.model.eval()
+                self.model_type = "dqn"
+                print("Loaded DQN model")
+            else:
+                from sb3_contrib import MaskablePPO
+                from sb3_contrib.common.wrappers import ActionMasker
+                self.model = MaskablePPO.load(model_path)
+                self.model_type = "ppo"
+                print("Loaded PPO model")
 
         # Environment
         self.env = BlockBlastEnv()
-        self.wrapped_env = ActionMasker(self.env, lambda e: e.action_masks())
 
         # Game state
         self.obs = None
@@ -68,7 +86,7 @@ class BlockBlastGUI:
 
     def reset(self):
         """Reset the game."""
-        self.obs, _ = self.wrapped_env.reset()
+        self.obs, _ = self.env.reset()
         self.game_over = False
         self.last_action = None
         self.total_reward = 0
@@ -79,11 +97,27 @@ class BlockBlastGUI:
         if self.game_over or self.paused:
             return
 
+        action_mask = self.env.action_masks()
+
         # Get action
         if self.model is not None:
-            action, _ = self.model.predict(
-                self.obs, deterministic=True, action_masks=self.env.action_masks()
-            )
+            if self.model_type == "dqn":
+                # DQN model
+                with torch.no_grad():
+                    grid = torch.tensor(self.obs["grid"], device=self.device).unsqueeze(0)
+                    blocks = torch.tensor(self.obs["blocks"], device=self.device).unsqueeze(0)
+                    block_mask = torch.tensor(self.obs["block_mask"], device=self.device).unsqueeze(0)
+                    q_values = self.model(grid, blocks, block_mask)
+                    # Mask invalid actions
+                    mask_tensor = torch.tensor(action_mask, device=self.device)
+                    q_values[~mask_tensor.unsqueeze(0)] = -1e9
+                    action = q_values.argmax(dim=1).item()
+            else:
+                # PPO model
+                from sb3_contrib.common.wrappers import ActionMasker
+                action, _ = self.model.predict(
+                    self.obs, deterministic=True, action_masks=action_mask
+                )
         else:
             # Random valid action
             valid_actions = self.env.game.get_valid_actions()
@@ -94,7 +128,7 @@ class BlockBlastGUI:
             action = block_idx * 64 + row * 8 + col
 
         self.last_action = action
-        self.obs, reward, terminated, truncated, _ = self.wrapped_env.step(action)
+        self.obs, reward, terminated, truncated, _ = self.env.step(action)
         self.total_reward += reward
         self.steps += 1
 

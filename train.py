@@ -112,15 +112,15 @@ def main():
         model = MaskablePPO(
             "MultiInputPolicy",
             env,
-            learning_rate=linear_schedule(args.lr),  # LR decay
+            learning_rate=3e-4,  # Constant LR works better here
             n_steps=2048,  # Steps per env before update
             batch_size=args.batch_size,
-            n_epochs=4,  # Fewer epochs = more stable
+            n_epochs=10,  # More epochs
             gamma=0.99,  # Discount factor
             gae_lambda=0.95,  # GAE lambda
-            clip_range=0.1,  # Tighter clip = more stable
+            clip_range=0.2,  # Standard clip
             clip_range_vf=None,  # No value clip
-            ent_coef=0.005,  # Lower entropy = less random
+            ent_coef=0.01,  # Standard entropy
             vf_coef=0.5,  # Value function coefficient
             max_grad_norm=0.5,  # Gradient clipping
             policy_kwargs=policy_kwargs,
